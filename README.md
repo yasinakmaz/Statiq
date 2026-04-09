@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/readme/statiq-hero.svg" alt="" width="100%" />
+</p>
+
 # Statiq
 
 Zero-overhead, compile-time MSSQL service library for Rust.
@@ -5,6 +9,10 @@ Zero-overhead, compile-time MSSQL service library for Rust.
 All SQL (SELECT, INSERT, UPDATE, DELETE, MERGE) is generated at compile time by the `#[derive(SqlEntity)]` proc-macro. There is no runtime string building, no reflection, no ORM magic. The library is async-first (Tokio), uses static dispatch throughout, and exposes `CancellationToken` on every operation for clean shutdown and request cancellation.
 
 Targets: Axum REST APIs, Leptos SSR applications, and Tauri desktop apps.
+
+<p align="center">
+  <img src="assets/readme/statiq-flow.svg" alt="" width="100%" />
+</p>
 
 ---
 
@@ -32,6 +40,10 @@ Targets: Axum REST APIs, Leptos SSR applications, and Tauri desktop apps.
 20. [config.json Field Reference](#20-configjson-field-reference)
 
 ---
+
+<p align="center">
+  <img src="assets/readme/statiq-sections.svg" alt="" width="100%" />
+</p>
 
 ## 1. Crates
 

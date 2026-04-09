@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 620" role="img" aria-labelledby="title desc">
+  <title id="title">Statiq compile-time flow</title>
+  <desc id="desc">Overview of compile-time SQL generation, services, configuration, and target applications in Statiq.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#08131d"/>
+      <stop offset="100%" stop-color="#16364a"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#102636" stop-opacity="0.94"/>
+      <stop offset="100%" stop-color="#153247" stop-opacity="0.92"/>
+    </linearGradient>
+    <linearGradient id="panel-soft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#effaf7"/>
+      <stop offset="100%" stop-color="#d5f5ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#021019" flood-opacity="0.34"/>
+    </filter>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M 44 0 L 0 0 0 44" fill="none" stroke="#d7f4ff" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+    <style>
+      .title { font: 700 30px 'Space Grotesk', 'Segoe UI', Arial, sans-serif; fill: #f4fbff; }
+      .copy { font: 500 18px 'Segoe UI', Arial, sans-serif; fill: #b9d7ea; }
+      .code { font: 700 24px 'Cascadia Code', 'Consolas', monospace; fill: #08131d; }
+      .code-light { font: 700 22px 'Cascadia Code', 'Consolas', monospace; fill: #f4fbff; }
+      .chip { font: 600 18px 'Space Grotesk', 'Segoe UI', Arial, sans-serif; fill: #eaf7ff; }
+      .chip-dark { font: 600 18px 'Space Grotesk', 'Segoe UI', Arial, sans-serif; fill: #0a1520; }
+      .micro { font: 600 15px 'Space Grotesk', 'Segoe UI', Arial, sans-serif; fill: #0a1520; }
+      .micro-light { font: 600 15px 'Space Grotesk', 'Segoe UI', Arial, sans-serif; fill: #dff7ff; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="620" rx="40" fill="url(#bg)"/>
+  <rect width="1440" height="620" rx="40" fill="url(#grid)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="84" width="268" height="250" rx="30" fill="url(#panel-soft)"/>
+    <rect x="98" y="116" width="172" height="42" rx="21" fill="#0c1c28"/>
+    <text class="micro-light" x="120" y="143">#[derive(SqlEntity)]</text>
+    <text class="title" x="96" y="208" fill="#0b1620">Defining an Entity</text>
+    <text class="copy" x="96" y="246" fill="#264558">SqlEntity</text>
+    <text class="copy" x="96" y="278" fill="#264558">row-mapping code</text>
+    <text class="copy" x="96" y="310" fill="#264558">pk_value</text>
+
+    <rect x="394" y="84" width="298" height="250" rx="30" fill="url(#panel)"/>
+    <text class="title" x="430" y="146">All SQL</text>
+    <text class="code-light" x="430" y="198">SELECT  INSERT</text>
+    <text class="code-light" x="430" y="234">UPDATE  DELETE</text>
+    <text class="code-light" x="430" y="270">MERGE</text>
+    <text class="copy" x="430" y="310">compile time</text>
+
+    <rect x="754" y="84" width="284" height="250" rx="30" fill="url(#panel)"/>
+    <text class="title" x="790" y="146">Building a Service</text>
+    <text class="copy" x="790" y="194">SqlService</text>
+    <text class="copy" x="790" y="226">SprocService</text>
+    <text class="copy" x="790" y="258">Transactions</text>
+    <text class="copy" x="790" y="290">Redis Cache</text>
+
+    <rect x="1100" y="84" width="276" height="250" rx="30" fill="url(#panel-soft)"/>
+    <text class="title" x="1136" y="146" fill="#0b1620">Targets</text>
+    <text class="copy" x="1136" y="194" fill="#264558">Axum REST APIs</text>
+    <text class="copy" x="1136" y="226" fill="#264558">Leptos SSR applications</text>
+    <text class="copy" x="1136" y="258" fill="#264558">Tauri desktop apps</text>
+    <text class="copy" x="1136" y="290" fill="#264558">MockRepository</text>
+  </g>
+
+  <g opacity="0.9">
+    <path d="M332 210 L394 210" fill="none" stroke="#63ecd7" stroke-width="4" stroke-linecap="round"/>
+    <path d="M678 210 L754 210" fill="none" stroke="#9fe5ff" stroke-width="4" stroke-linecap="round"/>
+    <path d="M1038 210 L1100 210" fill="none" stroke="#f6b15c" stroke-width="4" stroke-linecap="round"/>
+    <polygon points="384,201 394,210 384,219" fill="#63ecd7"/>
+    <polygon points="744,201 754,210 744,219" fill="#9fe5ff"/>
+    <polygon points="1090,201 1100,210 1090,219" fill="#f6b15c"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="402" width="188" height="84" rx="24" fill="url(#panel-soft)"/>
+    <text class="chip-dark" x="97" y="452">config.json</text>
+
+    <rect x="272" y="402" width="188" height="84" rx="24" fill="url(#panel)"/>
+    <text class="chip" x="318" y="452">params! Macro</text>
+
+    <rect x="480" y="402" width="188" height="84" rx="24" fill="url(#panel)"/>
+    <text class="chip" x="528" y="452">CRUD Operations</text>
+
+    <rect x="688" y="402" width="188" height="84" rx="24" fill="url(#panel-soft)"/>
+    <text class="chip-dark" x="732" y="452">Raw Queries</text>
+
+    <rect x="896" y="402" width="188" height="84" rx="24" fill="url(#panel)"/>
+    <text class="chip" x="944" y="452">Error Handling</text>
+
+    <rect x="1104" y="402" width="272" height="84" rx="24" fill="url(#panel)"/>
+    <text class="chip" x="1146" y="452">Testing with MockRepository</text>
+  </g>
+</svg>

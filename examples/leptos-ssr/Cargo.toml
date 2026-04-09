@@ -2,6 +2,7 @@
 name    = "leptos-ssr"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 # SQL tablosu (MSSQL'de oluşturulması gerekir):
 # CREATE TABLE dbo.Products (
