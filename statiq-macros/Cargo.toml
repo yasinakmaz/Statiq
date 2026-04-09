@@ -1,0 +1,21 @@
+[package]
+name          = "statiq-macros"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+description   = "Proc-macro crate for statiq — compile-time SQL generation for MSSQL entities via #[derive(SqlEntity)]"
+keywords      = ["mssql", "sql-server", "macro", "derive", "database"]
+categories    = ["database", "development-tools::procedural-macro-helpers"]
+documentation = "https://docs.rs/statiq"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn         = { version = "2.0.117", features = ["full", "extra-traits"] }
+quote       = "1.0.45"
+proc-macro2 = "1.0.106"

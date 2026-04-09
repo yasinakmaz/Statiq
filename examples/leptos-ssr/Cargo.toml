@@ -1,0 +1,30 @@
+[package]
+name    = "leptos-ssr"
+version = "0.1.0"
+edition = "2021"
+
+# SQL tablosu (MSSQL'de oluşturulması gerekir):
+# CREATE TABLE dbo.Products (
+#     Id    INT IDENTITY(1,1) PRIMARY KEY,
+#     Name  NVARCHAR(200) NOT NULL,
+#     Price FLOAT         NOT NULL,
+#     Stock INT           NOT NULL DEFAULT 0,
+#     Active BIT          NOT NULL DEFAULT 1
+# );
+
+[dependencies]
+statiq        = { path = "../../statiq" }
+statiq-macros = { path = "../../statiq-macros" }
+
+leptos       = { version = "0.7", features = ["ssr"] }
+leptos_axum  = { version = "0.7" }
+leptos_meta  = { version = "0.7", features = ["ssr"] }
+
+# leptos_axum 0.7 → axum 0.7.x kullanır; 0.8 ile tip uyuşmazlığı oluşur
+axum         = { version = "0.7", features = ["macros"] }
+tokio        = { workspace = true }
+tokio-util   = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+tracing      = { workspace = true }
+tracing-subscriber = { workspace = true }

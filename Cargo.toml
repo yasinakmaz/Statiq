@@ -1,13 +1,16 @@
 [workspace]
 members = [
-    "sqlservice",
-    "sqlservice-macros",
+    "statiq",
+    "statiq-macros",
+    "examples/axum-api",
+    "examples/tauri-app",
+    "examples/leptos-ssr",
 ]
 resolver = "2"
 
 # ── Shared package metadata (inherited by member crates) ─────────────────────
 [workspace.package]
-version      = "0.1.0"
+version      = "0.2.4"
 edition      = "2021"
 rust-version = "1.75"
 license      = "MIT OR Apache-2.0"
@@ -17,18 +20,18 @@ homepage     = "https://github.com/yasinakmaz/Statiq"
 
 # ── Shared dependencies ───────────────────────────────────────────────────────
 [workspace.dependencies]
-tokio              = { version = "1",    features = ["full"] }
-tokio-util         = { version = "0.7",  features = ["full"] }
-odbc-api           = { version = "9",    features = ["narrow"] }
-redis              = { version = "0.25", features = ["aio", "tokio-comp", "connection-manager"] }
-serde              = { version = "1",    features = ["derive"] }
-serde_json         = "1"
-thiserror          = "1"
-tracing            = "0.1"
-tracing-subscriber = { version = "0.3",  features = ["json", "env-filter"] }
-crossbeam-channel  = "0.5"
-futures            = "0.3"
-async-trait        = "0.1"
-chrono             = { version = "0.4",  features = ["serde"] }
-rust_decimal       = { version = "1",    features = ["serde-with-str"] }
-uuid               = { version = "1",    features = ["serde", "v4"] }
+tokio              = { version = "1.50.0",    features = ["full"] }
+tokio-util         = { version = "0.7.18",  features = ["full"] }
+odbc-api           = { version = "21.0.0",    features = ["narrow"] }
+redis              = { version = "1.0.5", features = ["aio", "tokio-comp", "connection-manager"] }
+serde              = { version = "1.0.228",    features = ["derive"] }
+serde_json         = "1.0.149"
+thiserror          = "2.0.18"
+tracing            = "0.1.44"
+tracing-subscriber = { version = "0.3.22",  features = ["json", "env-filter"] }
+crossbeam-channel  = "0.5.15"
+futures            = "0.3.32"
+async-trait        = "0.1.89"
+chrono             = { version = "0.4.44",  features = ["serde"] }
+rust_decimal       = { version = "1.40.0",    features = ["serde-with-str"] }
+uuid               = { version = "1.22.0",    features = ["serde", "v4"] }
