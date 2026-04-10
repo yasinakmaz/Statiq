@@ -18,19 +18,20 @@ pub fn derive_sql_entity(input: DeriveInput) -> syn::Result<TokenStream> {
 
     let struct_name = &info.struct_name;
 
-    let _table_name_lit  = &sql.table_name;
-    let schema_lit       = &sql.schema;
-    let fq_table_lit     = &sql.fq_table;
-    let select_cols_lit  = &sql.select_cols;
-    let select_sql_lit   = &sql.select_sql;
-    let select_pk_lit    = &sql.select_by_pk_sql;
-    let insert_sql_lit   = &sql.insert_sql;
-    let update_sql_lit   = &sql.update_sql;
-    let delete_sql_lit   = &sql.delete_sql;
-    let upsert_sql_lit   = &sql.upsert_sql;
-    let count_sql_lit    = &sql.count_sql;
-    let exists_sql_lit   = &sql.exists_sql;
-    let cache_prefix_lit = &sql.cache_prefix;
+    let _table_name_lit    = &sql.table_name;
+    let schema_lit         = &sql.schema;
+    let fq_table_lit       = &sql.fq_table;
+    let select_cols_lit    = &sql.select_cols;
+    let select_sql_lit     = &sql.select_sql;
+    let select_pk_lit      = &sql.select_by_pk_sql;
+    let insert_sql_lit     = &sql.insert_sql;
+    let update_sql_lit     = &sql.update_sql;
+    let delete_sql_lit     = &sql.delete_sql;
+    let hard_delete_sql_lit= &sql.hard_delete_sql;
+    let upsert_sql_lit     = &sql.upsert_sql;
+    let count_sql_lit      = &sql.count_sql;
+    let exists_sql_lit     = &sql.exists_sql;
+    let cache_prefix_lit   = &sql.cache_prefix;
 
     // parse.rs guarantees pk_field() is always Some at this point.
     let pk_field = info.pk_field().expect("SqlEntity: missing PK — parse.rs should have caught this");
@@ -51,8 +52,9 @@ pub fn derive_sql_entity(input: DeriveInput) -> syn::Result<TokenStream> {
             const SELECT_BY_PK_SQL:&'static str = #select_pk_lit;
             const INSERT_SQL:      &'static str = #insert_sql_lit;
             const UPDATE_SQL:      &'static str = #update_sql_lit;
-            const DELETE_SQL:      &'static str = #delete_sql_lit;
-            const UPSERT_SQL:      &'static str = #upsert_sql_lit;
+            const DELETE_SQL:       &'static str = #delete_sql_lit;
+            const HARD_DELETE_SQL:  &'static str = #hard_delete_sql_lit;
+            const UPSERT_SQL:       &'static str = #upsert_sql_lit;
             const COUNT_SQL:       &'static str = #count_sql_lit;
             const EXISTS_SQL:      &'static str = #exists_sql_lit;
             const PK_COLUMN:       &'static str = #pk_col;

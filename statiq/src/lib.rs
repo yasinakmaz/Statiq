@@ -37,8 +37,12 @@ pub mod query;
 pub mod repository;
 pub mod row;
 pub mod service;
+pub mod circuit_breaker;
 pub mod sproc;
 pub mod transaction;
+
+#[cfg(feature = "streaming")]
+pub mod stream;
 
 #[cfg(feature = "testing")]
 pub mod testing;

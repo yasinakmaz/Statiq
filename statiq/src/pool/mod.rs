@@ -1,3 +1,4 @@
+pub mod binding;
 pub mod connection;
 pub mod metrics;
 pub mod pooled;

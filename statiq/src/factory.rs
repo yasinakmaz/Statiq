@@ -14,6 +14,8 @@ pub struct SqlServiceFactory {
     config_path: Option<String>,
     config: Option<AppConfig>,
     shutdown: Option<CancellationToken>,
+    /// When set, reuse this pool instead of creating a new one.
+    shared_pool: Option<Pool>,
     /// When true, initialise the global tracing subscriber from `AppConfig::logging`.
     /// Defaults to `false` — libraries should not initialise global state.
     /// The application is responsible for setting up its own subscriber.
@@ -26,6 +28,7 @@ impl SqlServiceFactory {
             config_path: None,
             config: None,
             shutdown: None,
+            shared_pool: None,
             init_logging: false,
         }
     }
@@ -55,20 +58,36 @@ impl SqlServiceFactory {
         self
     }
 
+    /// Reuse an existing pool instead of creating a new one.
+    ///
+    /// When set, `build*` methods skip `Pool::new` and `spawn_validator`.
+    /// Useful when multiple `SqlService` instances share a single pool.
+    pub fn with_pool(mut self, pool: Pool) -> Self {
+        self.shared_pool = Some(pool);
+        self
+    }
+
     /// Build with Redis cache.
     pub async fn build_with_cache<T: SqlEntity>(
         self,
     ) -> Result<SqlService<T, RedisCache>, SqlError> {
         let shutdown = self.shutdown.clone();
         let init_logging = self.init_logging;
+        let shared_pool = self.shared_pool.clone();
         let cfg = self.load_config()?;
 
         if init_logging {
             crate::logging::init(&cfg.logging);
         }
 
-        let pool = Pool::new(cfg.mssql.connection_string.clone(), cfg.mssql.pool.clone())?;
-        pool.spawn_validator(shutdown.unwrap_or_else(CancellationToken::new));
+        let pool = match shared_pool {
+            Some(p) => p,
+            None => {
+                let p = Pool::new(cfg.mssql.connection_string.clone(), cfg.mssql.pool.clone())?;
+                p.spawn_validator(shutdown.unwrap_or_else(CancellationToken::new));
+                p
+            }
+        };
 
         let cache = RedisCache::new(&cfg.redis).await?;
         info!(table = T::TABLE_NAME, "SqlService (Redis) ready");
@@ -79,14 +98,21 @@ impl SqlServiceFactory {
     pub async fn build<T: SqlEntity>(self) -> Result<SqlService<T, NoCache>, SqlError> {
         let shutdown = self.shutdown.clone();
         let init_logging = self.init_logging;
+        let shared_pool = self.shared_pool.clone();
         let cfg = self.load_config()?;
 
         if init_logging {
             crate::logging::init(&cfg.logging);
         }
 
-        let pool = Pool::new(cfg.mssql.connection_string.clone(), cfg.mssql.pool.clone())?;
-        pool.spawn_validator(shutdown.unwrap_or_else(CancellationToken::new));
+        let pool = match shared_pool {
+            Some(p) => p,
+            None => {
+                let p = Pool::new(cfg.mssql.connection_string.clone(), cfg.mssql.pool.clone())?;
+                p.spawn_validator(shutdown.unwrap_or_else(CancellationToken::new));
+                p
+            }
+        };
 
         info!(table = T::TABLE_NAME, "SqlService (no cache) ready");
         Ok(SqlService::new(pool, NoCache, cfg.mssql.query))
@@ -96,14 +122,21 @@ impl SqlServiceFactory {
     pub async fn build_sproc(self) -> Result<SprocService, SqlError> {
         let shutdown = self.shutdown.clone();
         let init_logging = self.init_logging;
+        let shared_pool = self.shared_pool.clone();
         let cfg = self.load_config()?;
 
         if init_logging {
             crate::logging::init(&cfg.logging);
         }
 
-        let pool = Pool::new(cfg.mssql.connection_string.clone(), cfg.mssql.pool.clone())?;
-        pool.spawn_validator(shutdown.unwrap_or_else(CancellationToken::new));
+        let pool = match shared_pool {
+            Some(p) => p,
+            None => {
+                let p = Pool::new(cfg.mssql.connection_string.clone(), cfg.mssql.pool.clone())?;
+                p.spawn_validator(shutdown.unwrap_or_else(CancellationToken::new));
+                p
+            }
+        };
 
         info!("SprocService ready");
         Ok(SprocService::new(pool, cfg.mssql.query))
@@ -114,7 +147,7 @@ impl SqlServiceFactory {
             return Ok(cfg);
         }
         let path = self.config_path.unwrap_or_else(|| "config.json".to_string());
-        AppConfig::from_file(&path)
+        AppConfig::from_file_auto(&path)
     }
 }
 

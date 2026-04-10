@@ -12,6 +12,28 @@ use crate::params::{OdbcParam, PkValue};
 use crate::pool::connection::OdbcConn;
 use crate::pool::PooledConn;
 
+/// SQL Server transaction isolation level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolationLevel {
+    ReadUncommitted,
+    ReadCommitted,
+    RepeatableRead,
+    Snapshot,
+    Serializable,
+}
+
+impl IsolationLevel {
+    pub fn as_sql(self) -> &'static str {
+        match self {
+            Self::ReadUncommitted => "READ UNCOMMITTED",
+            Self::ReadCommitted   => "READ COMMITTED",
+            Self::RepeatableRead  => "REPEATABLE READ",
+            Self::Snapshot        => "SNAPSHOT",
+            Self::Serializable    => "SERIALIZABLE",
+        }
+    }
+}
+
 /// An active database transaction.
 ///
 /// On `Drop`, if not yet committed, automatically issues a synchronous rollback.
@@ -26,13 +48,22 @@ pub struct Transaction<'pool> {
 impl<'pool> Transaction<'pool> {
     /// Begin a transaction on a checked-out connection.
     pub(crate) fn begin(guard: PooledConn) -> Result<Self, SqlError> {
+        Self::begin_isolated(guard, IsolationLevel::ReadCommitted)
+    }
+
+    /// Begin a transaction with a specific isolation level.
+    /// Single round-trip: SET ISOLATION LEVEL + SET IMPLICIT_TRANSACTIONS OFF + BEGIN TRANSACTION.
+    pub(crate) fn begin_isolated(guard: PooledConn, level: IsolationLevel) -> Result<Self, SqlError> {
         let (mut conn, return_tx, notify) = guard.take();
 
-        // MSSQL: set manual commit mode
-        conn.execute_non_query_sync("SET IMPLICIT_TRANSACTIONS OFF; BEGIN TRANSACTION", &[])
+        let sql = format!(
+            "SET TRANSACTION ISOLATION LEVEL {}; SET IMPLICIT_TRANSACTIONS OFF; BEGIN TRANSACTION",
+            level.as_sql()
+        );
+        conn.execute_non_query_sync(&sql, &[])
             .map_err(|e| SqlError::odbc(0, format!("BEGIN TRANSACTION failed: {e}")))?;
 
-        debug!("Transaction started");
+        debug!(isolation = ?level, "Transaction started");
         Ok(Self {
             conn: Some(conn),
             return_tx,
@@ -99,6 +130,44 @@ impl<'pool> Transaction<'pool> {
     ) -> Result<usize, SqlError> {
         let conn = self.conn_mut()?;
         conn.execute_non_query_sync(sql, params)
+    }
+
+    // ── Savepoints ───────────────────────────────────────────────────────────
+
+    /// Create a savepoint within the current transaction.
+    ///
+    /// `name` must contain only alphanumeric characters and underscores.
+    pub async fn savepoint(&mut self, name: &str) -> Result<(), SqlError> {
+        Self::validate_savepoint_name(name)?;
+        let conn = self.conn_mut()?;
+        conn.execute_non_query_sync(&format!("SAVE TRANSACTION {name}"), &[])?;
+        debug!(savepoint = name, "Savepoint created");
+        Ok(())
+    }
+
+    /// Roll back to a previously created savepoint (partial rollback).
+    ///
+    /// `name` must contain only alphanumeric characters and underscores.
+    pub async fn rollback_to(&mut self, name: &str) -> Result<(), SqlError> {
+        Self::validate_savepoint_name(name)?;
+        let conn = self.conn_mut()?;
+        conn.execute_non_query_sync(&format!("ROLLBACK TRANSACTION {name}"), &[])?;
+        debug!(savepoint = name, "Rolled back to savepoint");
+        Ok(())
+    }
+
+    fn validate_savepoint_name(name: &str) -> Result<(), SqlError> {
+        if name.is_empty() {
+            return Err(SqlError::config("Savepoint name must not be empty"));
+        }
+        for ch in name.chars() {
+            if !ch.is_ascii_alphanumeric() && ch != '_' {
+                return Err(SqlError::config(format!(
+                    "Invalid savepoint name character: '{ch}' — only alphanumeric and '_' allowed"
+                )));
+            }
+        }
+        Ok(())
     }
 
     // ── Commit / Rollback ─────────────────────────────────────────────────────

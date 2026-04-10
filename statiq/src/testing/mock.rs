@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
+use crate::params::ParamValue;
+
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -127,14 +129,36 @@ impl<T: SqlEntity + Clone + Send + Sync + 'static> SqlRepository<T> for MockRepo
         Ok(self.store.lock().await.values().cloned().collect())
     }
 
-    /// Returns all items (SQL filter is not evaluated in the mock).
+    /// Returns items filtered by a simple `column = @param` expression.
+    ///
+    /// Supports single equality conditions like `Active = @active`.
+    /// For unsupported filter patterns, returns all items as a safe fallback.
     async fn get_where(
         &self,
-        _filter: &str,
-        _params: &[OdbcParam],
+        filter: &str,
+        params: &[OdbcParam],
         _token: &CancellationToken,
     ) -> Result<Vec<T>, SqlError> {
-        Ok(self.store.lock().await.values().cloned().collect())
+        // Attempt to parse a simple "col = @param" or "col=@param" filter.
+        // If parsing fails, fall back to returning all items.
+        let items: Vec<T> = self.store.lock().await.values().cloned().collect();
+
+        if let Some((col, param_name)) = parse_simple_eq_filter(filter) {
+            if let Some(odbc_param) = params.iter().find(|p| p.name.as_ref().eq_ignore_ascii_case(&param_name)) {
+                let expected_str = param_value_to_str(&odbc_param.value);
+                return Ok(items.into_iter().filter(|item| {
+                    // Try to match via OdbcRow serialisation — check the column value as string.
+                    let params = item.to_params();
+                    params.iter().any(|p| {
+                        let col_match = p.name.as_ref().eq_ignore_ascii_case(&col)
+                            || p.name.as_ref().to_lowercase() == col.to_lowercase().trim_matches(|c| c == '[' || c == ']');
+                        col_match && expected_str.as_deref() == Some(param_value_to_str(&p.value).unwrap_or_default().as_str())
+                    })
+                }).collect());
+            }
+        }
+
+        Ok(items)
     }
 
     async fn get_paged(
@@ -275,4 +299,40 @@ impl<T: SqlEntity + Clone + Send + Sync + 'static> SqlRepository<T> for MockRepo
             "MockRepository::scalar is not supported — use a custom mock for scalar queries",
         ))
     }
+}
+
+// ── filter helpers ────────────────────────────────────────────────────────────
+
+/// Parse a simple `column = @param` filter into `(column_name, param_name)`.
+/// Returns `None` for unsupported patterns.
+fn parse_simple_eq_filter(filter: &str) -> Option<(String, String)> {
+    let filter = filter.trim();
+    // Accept: `Col = @p`, `[Col] = @p`, `Col=@p`
+    let (lhs, rhs) = filter.split_once('=')?;
+    let col = lhs.trim().trim_matches(|c| c == '[' || c == ']').to_string();
+    let param = rhs.trim().strip_prefix('@')?.to_string();
+
+    // Only accept single-token names (no spaces in param name).
+    if col.contains(' ') || param.contains(' ') {
+        return None;
+    }
+    Some((col, param))
+}
+
+/// Convert a `ParamValue` to its string representation for comparison.
+fn param_value_to_str(value: &ParamValue) -> Option<String> {
+    Some(match value {
+        ParamValue::Bool(v)     => (if *v { "1" } else { "0" }).to_string(),
+        ParamValue::U8(v)       => v.to_string(),
+        ParamValue::I16(v)      => v.to_string(),
+        ParamValue::I32(v)      => v.to_string(),
+        ParamValue::I64(v)      => v.to_string(),
+        ParamValue::F32(v)      => v.to_string(),
+        ParamValue::F64(v)      => v.to_string(),
+        ParamValue::Decimal(v)  => v.to_string(),
+        ParamValue::Str(v)      => v.clone(),
+        ParamValue::Guid(v)     => v.to_string(),
+        ParamValue::Null        => return None,
+        _                       => return None,
+    })
 }

@@ -18,6 +18,22 @@ pub fn generate_from_row(info: &StructInfo) -> TokenStream {
             continue;
         }
 
+        // Masked String fields: read from DB (to advance cursor) but replace value.
+        if field.is_masked {
+            let ty_str = quote!(&field.ty).to_string().replace(' ', "");
+            let is_optional = ty_str.starts_with("Option<");
+            if is_optional {
+                field_assignments.push(quote! {
+                    #rust_ident: { let _ = row.get_string_opt(#sql_name)?; Some("***".to_string()) }
+                });
+            } else {
+                field_assignments.push(quote! {
+                    #rust_ident: { let _ = row.get_string(#sql_name)?; "***".to_string() }
+                });
+            }
+            continue;
+        }
+
         let getter = get_row_getter(&field.ty, sql_name);
         field_assignments.push(quote! {
             #rust_ident: #getter

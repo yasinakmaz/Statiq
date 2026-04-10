@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -5,14 +7,31 @@ use uuid::Uuid;
 /// A single named parameter value for an ODBC query.
 #[derive(Debug, Clone)]
 pub struct OdbcParam {
-    pub name: &'static str,
+    /// Parameter name — `Cow::Borrowed` for compile-time literals (zero-cost),
+    /// `Cow::Owned` for runtime-generated names (e.g. SprocParams, no Box::leak).
+    pub name: Cow<'static, str>,
     pub value: ParamValue,
 }
 
 impl OdbcParam {
+    /// Compile-time constant names — used by `params!{}` macro and `#[derive(SqlEntity)]`.
+    /// `&'static str` is stored as `Cow::Borrowed` at zero cost.
     #[inline]
     pub const fn new(name: &'static str, value: ParamValue) -> Self {
-        Self { name, value }
+        Self {
+            name: Cow::Borrowed(name),
+            value,
+        }
+    }
+
+    /// Runtime-generated names — used by `SprocParams::add()`.
+    /// Eliminates the previous `Box::leak` memory leak.
+    #[inline]
+    pub fn new_dynamic(name: String, value: ParamValue) -> Self {
+        Self {
+            name: Cow::Owned(name),
+            value,
+        }
     }
 }
 

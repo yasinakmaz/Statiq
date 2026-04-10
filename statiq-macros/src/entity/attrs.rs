@@ -136,3 +136,70 @@ impl ServerDefaultAttr {
         Self { is_server_default }
     }
 }
+
+/// Parsed result of `#[sql_soft_delete("IsDeleted")]`
+///
+/// When present, SELECT/COUNT/EXISTS queries add `WHERE [col] = 0`,
+/// and DELETE is rewritten to `UPDATE SET [col] = 1`.
+#[derive(Default, Clone)]
+pub struct SoftDeleteAttr {
+    pub column: Option<String>,
+}
+
+/// Parsed result of `#[sql_tenant_id("TenantId")]`
+///
+/// When present, all queries add `AND [col] = @__tenant_id`.
+#[derive(Default, Clone)]
+pub struct TenantIdAttr {
+    pub column: Option<String>,
+}
+
+/// Marker for `#[sql_mask]` on a `String` field.
+///
+/// The field is read from the database but its value is replaced with `"***"`
+/// when constructing the Rust entity.
+#[derive(Default, Clone)]
+pub struct MaskAttr {
+    pub is_masked: bool,
+}
+
+impl SoftDeleteAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Self {
+        let mut result = SoftDeleteAttr::default();
+        for attr in attrs {
+            if !attr.path().is_ident("sql_soft_delete") { continue; }
+            let _ = attr.parse_args_with(|input: syn::parse::ParseStream| {
+                if input.peek(syn::LitStr) {
+                    let s: syn::LitStr = input.parse()?;
+                    result.column = Some(s.value());
+                }
+                Ok(())
+            });
+        }
+        result
+    }
+}
+
+impl TenantIdAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Self {
+        let mut result = TenantIdAttr::default();
+        for attr in attrs {
+            if !attr.path().is_ident("sql_tenant_id") { continue; }
+            let _ = attr.parse_args_with(|input: syn::parse::ParseStream| {
+                if input.peek(syn::LitStr) {
+                    let s: syn::LitStr = input.parse()?;
+                    result.column = Some(s.value());
+                }
+                Ok(())
+            });
+        }
+        result
+    }
+}
+
+impl MaskAttr {
+    pub fn from_attrs(attrs: &[Attribute]) -> Self {
+        let is_masked = attrs.iter().any(|a| a.path().is_ident("sql_mask"));
+        Self { is_masked }
+    }
+}

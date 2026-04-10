@@ -11,6 +11,8 @@ pub struct GeneratedSql {
     pub insert_sql: String,
     pub update_sql: String,
     pub delete_sql: String,
+    /// Physical DELETE — only differs from `delete_sql` when soft-delete is active.
+    pub hard_delete_sql: String,
     pub upsert_sql: String,
     pub count_sql: String,
     pub exists_sql: String,
@@ -26,15 +28,39 @@ impl GeneratedSql {
         // SELECT cols
         let active: Vec<&str> = info.active_fields().map(|f| f.sql_name.as_str()).collect();
         let select_cols = active.join(", ");
-        let select_sql = format!("SELECT {select_cols} FROM {fq}");
 
         // parse.rs guarantees pk_field() is always Some after successful parse.
         let pk = info.pk_field().expect("SqlEntity: missing PK field — parse.rs should have caught this");
         let pk_col  = pk.sql_name.as_str();
         let pk_rust = pk.rust_name.as_str();
 
+        // Build optional WHERE clauses for soft-delete and tenant-id filters
+        let soft_filter = info.soft_delete_col.as_deref()
+            .map(|col| format!("[{col}] = 0"))
+            .unwrap_or_default();
+        let tenant_filter = info.tenant_id_col.as_deref()
+            .map(|col| format!("[{col}] = @__tenant_id"))
+            .unwrap_or_default();
+
+        let extra_filters: Vec<&str> = [soft_filter.as_str(), tenant_filter.as_str()]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .copied()
+            .collect();
+        let extra_where = if extra_filters.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", extra_filters.join(" AND "))
+        };
+        let extra_and = if extra_filters.is_empty() {
+            String::new()
+        } else {
+            format!(" AND {}", extra_filters.join(" AND "))
+        };
+
+        let select_sql = format!("SELECT {select_cols} FROM {fq}{extra_where}");
         let select_by_pk_sql = format!(
-            "SELECT {select_cols} FROM {fq} WHERE {pk_col} = @{pk_col}"
+            "SELECT {select_cols} FROM {fq} WHERE {pk_col} = @{pk_col}{extra_and}"
         );
 
         // INSERT
@@ -58,8 +84,15 @@ impl GeneratedSql {
             .join(", ");
         let update_sql = format!("UPDATE {fq} SET {upd_sets} WHERE {pk_col} = @{pk_rust}");
 
-        // DELETE
-        let delete_sql = format!("DELETE FROM {fq} WHERE {pk_col} = @{pk_col}");
+        // DELETE (hard — always a physical DELETE)
+        let hard_delete_sql = format!("DELETE FROM {fq} WHERE {pk_col} = @{pk_col}");
+
+        // Soft DELETE — rewrite to UPDATE if soft-delete column is configured
+        let delete_sql = if let Some(sd_col) = &info.soft_delete_col {
+            format!("UPDATE {fq} SET [{sd_col}] = 1 WHERE {pk_col} = @{pk_col}")
+        } else {
+            hard_delete_sql.clone()
+        };
 
         // UPSERT (MERGE)
         let merge_using_cols = ins_fields
@@ -82,9 +115,9 @@ impl GeneratedSql {
              WHEN NOT MATCHED THEN INSERT ({merge_insert_cols}) VALUES ({merge_insert_vals});"
         );
 
-        // COUNT / EXISTS
-        let count_sql = format!("SELECT COUNT_BIG(*) FROM {fq}");
-        let exists_sql = format!("SELECT CAST(1 AS BIT) FROM {fq} WHERE {pk_col} = @{pk_col}");
+        // COUNT / EXISTS — respect soft-delete / tenant-id filters
+        let count_sql = format!("SELECT COUNT_BIG(*) FROM {fq}{extra_where}");
+        let exists_sql = format!("SELECT CAST(1 AS BIT) FROM {fq} WHERE {pk_col} = @{pk_col}{extra_and}");
 
         let cache_prefix = format!("SqlService::{table}");
 
@@ -98,6 +131,7 @@ impl GeneratedSql {
             insert_sql,
             update_sql,
             delete_sql,
+            hard_delete_sql,
             upsert_sql,
             count_sql,
             exists_sql,

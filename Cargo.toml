@@ -1,10 +1,7 @@
 [workspace]
 members = [
     "statiq",
-    "statiq-macros",
-    "examples/axum-api",
-    "examples/tauri-app",
-    "examples/leptos-ssr",
+    "statiq-macros"
 ]
 resolver = "2"
 
@@ -35,3 +32,10 @@ async-trait        = "0.1.89"
 chrono             = { version = "0.4.44",  features = ["serde"] }
 rust_decimal       = { version = "1.40.0",    features = ["serde-with-str"] }
 uuid               = { version = "1.22.0",    features = ["serde", "v4"] }
+aes-gcm            = "0.10"
+base64             = "0.22"
+hex                = "0.4"
+moka               = { version = "0.12", features = ["future"] }
+bytes              = "1"
+async-stream       = "0.3"
+tokio-stream       = "0.1"

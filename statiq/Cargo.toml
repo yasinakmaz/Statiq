@@ -15,9 +15,12 @@ documentation = "https://docs.rs/statiq"
 exclude       = [".github/**", "tests/**"]
 
 [features]
-axum    = ["dep:axum"]
-tauri   = []
-testing = []
+axum             = ["dep:axum"]
+tauri            = []
+testing          = []
+encrypted-config = ["dep:aes-gcm", "dep:base64", "dep:hex"]
+local-cache      = ["dep:moka", "dep:bytes"]
+streaming        = ["dep:async-stream", "dep:tokio-stream"]
 
 [dependencies]
 statiq-macros      = { path = "../statiq-macros", version = "0.2.0" }
@@ -36,7 +39,14 @@ async-trait        = { workspace = true }
 chrono             = { workspace = true }
 rust_decimal       = { workspace = true }
 uuid               = { workspace = true }
-axum = { version = "0.8.8", optional = true, default-features = false, features = ["json", "http1"] }
+axum               = { version = "0.8.8", optional = true, default-features = false, features = ["json", "http1"] }
+aes-gcm            = { workspace = true, optional = true }
+base64             = { workspace = true, optional = true }
+hex                = { workspace = true, optional = true }
+moka               = { workspace = true, optional = true }
+bytes              = { workspace = true, optional = true }
+async-stream       = { workspace = true, optional = true }
+tokio-stream       = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.50.0", features = ["test-util"] }

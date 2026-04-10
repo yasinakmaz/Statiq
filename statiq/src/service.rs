@@ -11,7 +11,7 @@ use crate::entity::SqlEntity;
 use crate::error::SqlError;
 use crate::params::{OdbcParam, PkValue};
 use crate::pool::{Pool, PooledConn};
-use crate::query::{filtered_sql, paged_sql};
+use crate::query::{filtered_sql, paged_sql, validate_filter};
 use crate::repository::SqlRepository;
 use crate::row::OdbcRow;
 use crate::transaction::Transaction;
@@ -19,8 +19,12 @@ use crate::transaction::Transaction;
 /// Main entry point — wraps a pool + cache for entity `T`.
 pub struct SqlService<T: SqlEntity, C: CacheLayer = crate::cache::NoCache> {
     pub(crate) pool: Pool,
+    /// Optional read-replica pool. When set, SELECT queries are routed here.
+    pub(crate) read_pool: Option<Pool>,
     pub(crate) cache: Arc<C>,
     pub(crate) query_cfg: QueryConfig,
+    /// Tenant ID automatically appended as `@__tenant_id` to every query.
+    pub(crate) tenant_id: Option<crate::params::ParamValue>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -28,9 +32,51 @@ impl<T: SqlEntity, C: CacheLayer> SqlService<T, C> {
     pub(crate) fn new(pool: Pool, cache: C, query_cfg: QueryConfig) -> Self {
         Self {
             pool,
+            read_pool: None,
             cache: Arc::new(cache),
             query_cfg,
+            tenant_id: None,
             _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Attach a read-replica pool. SELECT queries will be routed to this pool;
+    /// writes (INSERT/UPDATE/DELETE) always use the primary pool.
+    pub fn with_read_pool(mut self, pool: Pool) -> Self {
+        self.read_pool = Some(pool);
+        self
+    }
+
+    /// Override the query timeout for this service instance.
+    pub fn with_timeout(mut self, secs: u64) -> Self {
+        self.query_cfg.timeout_secs = Some(secs);
+        self
+    }
+
+    /// Set tenant ID — automatically appended as `@__tenant_id` parameter to
+    /// every query. Designed for use with `#[sql_tenant_id("TenantId")]`.
+    pub fn with_tenant(mut self, tenant_id: impl Into<crate::params::ParamValue>) -> Self {
+        self.tenant_id = Some(tenant_id.into());
+        self
+    }
+
+    /// Build the final param list, prepending tenant_id if set.
+    fn build_params<'a>(&'a self, params: &'a [OdbcParam]) -> std::borrow::Cow<'a, [OdbcParam]> {
+        match &self.tenant_id {
+            None => std::borrow::Cow::Borrowed(params),
+            Some(tid) => {
+                let mut all = params.to_vec();
+                all.push(OdbcParam::new("__tenant_id", tid.clone()));
+                std::borrow::Cow::Owned(all)
+            }
+        }
+    }
+
+    /// Check out a read connection — uses replica pool when available.
+    async fn checkout_read(&self, token: &CancellationToken) -> Result<PooledConn, SqlError> {
+        match &self.read_pool {
+            Some(p) => p.checkout(token).await,
+            None    => self.pool.checkout(token).await,
         }
     }
 
@@ -54,10 +100,10 @@ impl<T: SqlEntity, C: CacheLayer> SqlService<T, C> {
         params: &[OdbcParam],
         token: &CancellationToken,
     ) -> Result<Vec<OdbcRow>, SqlError> {
-        let mut conn = self.checkout(token).await?;
+        let mut conn = self.checkout_read(token).await?;
         let start = Instant::now();
         let sql_owned = sql.to_owned();
-        let params_owned: Vec<OdbcParam> = params.to_vec();
+        let params_owned: Vec<OdbcParam> = self.build_params(params).into_owned();
         let max_text_bytes = self.query_cfg.max_text_bytes;
 
         let result = tokio::select! {
@@ -82,7 +128,7 @@ impl<T: SqlEntity, C: CacheLayer> SqlService<T, C> {
         let mut conn = self.checkout(token).await?;
         let start = Instant::now();
         let sql_owned = sql.to_owned();
-        let params_owned: Vec<OdbcParam> = params.to_vec();
+        let params_owned: Vec<OdbcParam> = self.build_params(params).into_owned();
 
         let result = tokio::select! {
             biased;
@@ -124,9 +170,74 @@ impl<T: SqlEntity, C: CacheLayer> SqlService<T, C> {
         Transaction::begin(conn)
     }
 
+    /// Begin a transaction with a specific isolation level.
+    pub async fn begin_transaction_isolated<'a>(
+        &'a self,
+        level: crate::transaction::IsolationLevel,
+        token: &CancellationToken,
+    ) -> Result<Transaction<'a>, SqlError> {
+        let conn = self.checkout(token).await?;
+        Transaction::begin_isolated(conn, level)
+    }
+
     /// Pool metrics snapshot.
     pub fn pool_metrics(&self) -> crate::pool::metrics::MetricsSnapshot {
         self.pool.metrics()
+    }
+
+    /// Insert multiple entities in batches, each batch wrapped in a transaction.
+    ///
+    /// Returns the total number of rows inserted. Cache is invalidated after each
+    /// successful batch commit.
+    ///
+    /// If any batch fails the active transaction is rolled back; already-committed
+    /// batches are NOT rolled back (no distributed transaction). Use a single
+    /// outer transaction for all-or-nothing semantics.
+    pub async fn bulk_insert(
+        &self,
+        entities: &[T],
+        batch_size: usize,
+        token: &CancellationToken,
+    ) -> Result<usize, SqlError> {
+        let batch_size = batch_size.max(1);
+        let mut total_inserted = 0usize;
+
+        for chunk in entities.chunks(batch_size) {
+            let conn = self.checkout(token).await?;
+            let mut tx = Transaction::begin(conn)?;
+
+            for entity in chunk {
+                let params = entity.to_params();
+                tx.execute_raw(T::INSERT_SQL, &params, token).await?;
+                total_inserted += 1;
+            }
+
+            tx.commit().await?;
+
+            // Invalidate entire table cache after each committed batch.
+            let _ = self.cache.invalidate_table(T::CACHE_PREFIX).await;
+        }
+
+        Ok(total_inserted)
+    }
+
+    /// Execute a named query from a [`QueryRegistry`] and return typed entities.
+    ///
+    /// ```ignore
+    /// let users = svc.named_query(&registry, "active_users", params![active: true], &ct).await?;
+    /// ```
+    pub async fn named_query(
+        &self,
+        registry: &crate::query::QueryRegistry,
+        name: &str,
+        params: &[OdbcParam],
+        token: &CancellationToken,
+    ) -> Result<Vec<T>, SqlError> {
+        let sql = registry
+            .get(name)
+            .ok_or_else(|| SqlError::config(format!("Query '{name}' not found in registry")))?;
+        let rows = self.run_query(sql, params, token).await?;
+        rows.iter().map(T::from_row).collect()
     }
 }
 
@@ -176,6 +287,7 @@ impl<T: SqlEntity, C: CacheLayer> SqlRepository<T> for SqlService<T, C> {
         params: &[OdbcParam],
         token: &CancellationToken,
     ) -> Result<Vec<T>, SqlError> {
+        validate_filter(filter)?;
         let sql = filtered_sql(T::SELECT_SQL, filter);
         let rows = self.run_query(&sql, params, token).await?;
         rows.iter().map(T::from_row).collect()

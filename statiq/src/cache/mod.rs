@@ -1,6 +1,9 @@
 pub mod noop;
 pub mod redis;
 
+#[cfg(feature = "local-cache")]
+pub mod local;
+
 use std::time::Duration;
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
@@ -8,6 +11,9 @@ use crate::error::SqlError;
 
 pub use noop::NoCache;
 pub use redis::RedisCache;
+
+#[cfg(feature = "local-cache")]
+pub use local::LocalCache;
 
 /// Strategy interface for caching — implemented by `RedisCache` and `NoCache`.
 #[async_trait]

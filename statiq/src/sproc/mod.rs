@@ -134,13 +134,14 @@ where
 ///     .add("@Name",    "Acme Corp")
 ///     .add("@Active",  true)
 ///     .add_nullable("@TaxId", tax_id.as_deref())
+///     .add_output("@ResultCode")   // OUTPUT parameter — value read from result set
 /// ```
 ///
 /// Parameter names may include or omit the leading `@` — both forms are accepted.
 #[derive(Debug, Default, Clone)]
 pub struct SprocParams {
-    // (name_without_at, value)
-    params: Vec<(String, ParamValue)>,
+    // (name_without_at, value, is_output)
+    params: Vec<(String, ParamValue, bool)>,
 }
 
 impl SprocParams {
@@ -152,7 +153,7 @@ impl SprocParams {
     #[inline]
     pub fn add(mut self, name: &str, value: impl Into<ParamValue>) -> Self {
         let key = strip_at(name);
-        self.params.push((key, value.into()));
+        self.params.push((key, value.into(), false));
         self
     }
 
@@ -164,39 +165,55 @@ impl SprocParams {
             Some(v) => v.into(),
             None => ParamValue::Null,
         };
-        self.params.push((key, pv));
+        self.params.push((key, pv, false));
         self
     }
 
-    /// Build the `EXEC sproc_name @p = @p, …` SQL string and the param slice.
+    /// Declare an OUTPUT parameter.
     ///
-    /// Names are leaked to produce `&'static str` required by [`OdbcParam`].
-    /// This is bounded (one small allocation per unique param name) and safe.
+    /// The parameter is sent as `NULL OUTPUT` in the EXEC call. SQL Server writes
+    /// the output value back, which is captured from the last result set returned
+    /// by the procedure (SQL Server appends OUTPUT values as an extra result set
+    /// when using `EXEC` with `OUTPUT` keywords).
+    #[inline]
+    pub fn add_output(mut self, name: &str) -> Self {
+        let key = strip_at(name);
+        self.params.push((key, ParamValue::Null, true));
+        self
+    }
+
+    /// Returns the names of all OUTPUT parameters (without leading `@`).
+    pub fn output_names(&self) -> Vec<&str> {
+        self.params
+            .iter()
+            .filter(|(_, _, is_out)| *is_out)
+            .map(|(n, _, _)| n.as_str())
+            .collect()
+    }
+
+    /// Build the `EXEC sproc_name @p = @p, …` SQL string and the param slice.
+    /// OUTPUT parameters are annotated with the `OUTPUT` keyword.
     pub(crate) fn into_exec(self, sproc_name: &str) -> (String, Vec<OdbcParam>) {
-        // Pre-size: "EXEC " + name + " " + each "@n = @n, " pair (~2*name+7 chars each).
-        let extra = self.params.iter().map(|(n, _)| n.len() * 2 + 8).sum::<usize>();
+        // Pre-size: "EXEC " + name + " " + each "@n = @n [OUTPUT], " pair.
+        let extra = self.params.iter().map(|(n, _, out)| n.len() * 2 + if *out { 16 } else { 8 }).sum::<usize>();
         let mut sql = String::with_capacity(5 + sproc_name.len() + extra);
         sql.push_str("EXEC ");
         sql.push_str(sproc_name);
-        for (i, (n, _)) in self.params.iter().enumerate() {
+        for (i, (n, _, is_output)) in self.params.iter().enumerate() {
             if i == 0 { sql.push(' '); } else { sql.push_str(", "); }
             sql.push('@');
             sql.push_str(n);
             sql.push_str(" = @");
             sql.push_str(n);
+            if *is_output {
+                sql.push_str(" OUTPUT");
+            }
         }
 
         let odbc_params = self
             .params
             .into_iter()
-            .map(|(name, value)| {
-                // SAFETY: The leaked string is a short param name literal.
-                // Leaking is bounded to the number of unique param names used
-                // across the process lifetime — acceptable in server applications.
-                let static_name: &'static str =
-                    Box::leak(name.into_boxed_str());
-                OdbcParam::new(static_name, value)
-            })
+            .map(|(name, value, _)| OdbcParam::new_dynamic(name, value))
             .collect();
 
         (sql, odbc_params)

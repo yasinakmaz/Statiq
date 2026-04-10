@@ -1,5 +1,36 @@
 /// Runtime query builder — wraps static SQL templates with dynamic extensions.
 
+use crate::error::SqlError;
+
+/// Validate a WHERE filter string against a strict allowlist.
+///
+/// Blocks SQL injection by rejecting dangerous keywords and characters.
+/// Only column comparisons, logical operators, and parameterized `@name`
+/// placeholders are permitted.
+pub fn validate_filter(filter: &str) -> Result<(), SqlError> {
+    let upper = filter.to_ascii_uppercase();
+    static BANNED: &[&str] = &[
+        ";", "--", "/*", "*/", "EXEC", "EXECUTE", "XP_", "SP_",
+        "DROP", "TRUNCATE", "ALTER", "CREATE", "INSERT", "UPDATE",
+        "DELETE", "OPENROWSET", "BULK", "WAITFOR", "SHUTDOWN",
+    ];
+    for banned in BANNED {
+        if upper.contains(banned) {
+            return Err(SqlError::config(format!("Disallowed token in filter: {banned}")));
+        }
+    }
+    for ch in filter.chars() {
+        if !matches!(ch,
+            'A'..='Z' | 'a'..='z' | '0'..='9' | ' ' | '\t' | '\n' |
+            '@' | '_' | '.' | '[' | ']' | '(' | ')' |
+            '=' | '<' | '>' | '!' | '\'' | '%' | ',' | '-' | '+' | '/'
+        ) {
+            return Err(SqlError::config(format!("Disallowed character in filter: '{ch}'")));
+        }
+    }
+    Ok(())
+}
+
 pub struct QueryBuilder {
     base_sql: String,
     where_clause: Option<String>,

@@ -19,6 +19,8 @@ pub trait SqlEntity: Sized + Send + Sync + 'static + Serialize + DeserializeOwne
     const INSERT_SQL: &'static str;
     const UPDATE_SQL: &'static str;
     const DELETE_SQL: &'static str;
+    /// Physical DELETE — always a real DELETE FROM even when soft-delete is active.
+    const HARD_DELETE_SQL: &'static str;
     const UPSERT_SQL: &'static str;
     const COUNT_SQL: &'static str;
     const EXISTS_SQL: &'static str;
@@ -32,4 +34,16 @@ pub trait SqlEntity: Sized + Send + Sync + 'static + Serialize + DeserializeOwne
     fn from_row(row: &OdbcRow) -> Result<Self, SqlError>;
     fn to_params(&self) -> Vec<OdbcParam>;
     fn pk_value(&self) -> PkValue;
+
+    /// Optional row-level security filter appended to all SELECT queries.
+    ///
+    /// Return a SQL fragment (without `WHERE`/`AND`) to restrict which rows are
+    /// visible to the current user. The fragment may reference `@__tenant_id`
+    /// or other parameters. The default implementation returns `None` (no RLS).
+    ///
+    /// Override this in a manual `impl SqlEntity for MyEntity` block when RLS
+    /// is needed without the `#[sql_tenant_id]` macro attribute.
+    fn rls_filter() -> Option<&'static str> {
+        None
+    }
 }

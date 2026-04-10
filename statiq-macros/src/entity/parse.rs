@@ -1,5 +1,5 @@
 use syn::{Data, DeriveInput, Fields};
-use super::attrs::{ColumnAttr, ComputedAttr, IgnoreAttr, PkAttr, ServerDefaultAttr, TableAttr};
+use super::attrs::{ColumnAttr, ComputedAttr, IgnoreAttr, MaskAttr, PkAttr, ServerDefaultAttr, SoftDeleteAttr, TableAttr, TenantIdAttr};
 
 /// One field of the struct, fully resolved.
 pub struct FieldInfo {
@@ -13,6 +13,8 @@ pub struct FieldInfo {
     pub is_computed: bool,
     /// `#[sql_default]` — server-side default; excluded from INSERT, included in UPDATE.
     pub is_server_default: bool,
+    /// `#[sql_mask]` — value replaced with `"***"` in `from_row`.
+    pub is_masked: bool,
 }
 
 pub struct StructInfo {
@@ -20,6 +22,10 @@ pub struct StructInfo {
     pub table_name: String,
     pub schema: String,
     pub fields: Vec<FieldInfo>,
+    /// Column name for soft-delete flag (from `#[sql_soft_delete("IsDeleted")]`).
+    pub soft_delete_col: Option<String>,
+    /// Column name for tenant isolation (from `#[sql_tenant_id("TenantId")]`).
+    pub tenant_id_col: Option<String>,
 }
 
 impl StructInfo {
@@ -30,6 +36,8 @@ impl StructInfo {
             .clone()
             .unwrap_or_else(|| input.ident.to_string());
         let schema = table_attr.schema.clone().unwrap_or_else(|| "dbo".to_string());
+        let soft_delete_col = SoftDeleteAttr::from_attrs(&input.attrs).column;
+        let tenant_id_col = TenantIdAttr::from_attrs(&input.attrs).column;
 
         let named_fields = match &input.data {
             Data::Struct(ds) => match &ds.fields {
@@ -47,6 +55,7 @@ impl StructInfo {
             let col      = ColumnAttr::from_attrs(&field.attrs);
             let computed = ComputedAttr::from_attrs(&field.attrs);
             let default  = ServerDefaultAttr::from_attrs(&field.attrs);
+            let mask     = MaskAttr::from_attrs(&field.attrs);
 
             let sql_name = col.column_name.clone().unwrap_or_else(|| rust_name.clone());
 
@@ -59,6 +68,7 @@ impl StructInfo {
                 is_ignored: ignore.ignore,
                 is_computed: computed.is_computed,
                 is_server_default: default.is_server_default,
+                is_masked: mask.is_masked,
             });
         }
 
@@ -79,6 +89,8 @@ impl StructInfo {
             table_name,
             schema,
             fields,
+            soft_delete_col,
+            tenant_id_col,
         })
     }
 

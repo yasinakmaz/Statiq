@@ -40,6 +40,10 @@ pub enum SqlError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[cfg(feature = "encrypted-config")]
+    #[error("Crypto error: {0}")]
+    Crypto(String),
 }
 
 impl SqlError {
@@ -81,6 +85,8 @@ impl SqlError {
             Self::RowMapping { .. }                  => "row_mapping_error",
             Self::NotFound { .. }                    => "not_found",
             Self::Io(_)                              => "io_error",
+            #[cfg(feature = "encrypted-config")]
+            Self::Crypto(_)                          => "crypto_error",
         }
     }
 

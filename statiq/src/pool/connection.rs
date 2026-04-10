@@ -30,9 +30,13 @@ pub struct OdbcConn {
     pub reset_on_reuse: bool,
 }
 
-// SAFETY: odbc-api Connection is not Send by default, but we enforce
-// single-threaded access via the pool checkout/return protocol.
-// Each connection is held by exactly one task at a time.
+// SAFETY: Pool checkout/return protokolü her OdbcConn'un aynı anda yalnızca
+// bir task tarafından tutulduğunu garanti eder:
+// 1. PooledConn tek erişim noktasıdır (DerefMut + Drop auto-return).
+// 2. Pool::checkout en fazla bir PooledConn/connection döndürür.
+// 3. Transaction::begin PooledConn'u consume eder, aliasing imkansızdır.
+// Send: spawn_blocking'e move edilmesi için gerekli.
+// Sync: Arc<Pool>'un thread'ler arası paylaşımı için gerekli.
 unsafe impl Send for OdbcConn {}
 unsafe impl Sync for OdbcConn {}
 
@@ -77,24 +81,24 @@ impl OdbcConn {
 
     /// Execute a SELECT and return rows (synchronous).
     ///
-    /// Parameters are embedded into the SQL string at call time.
-    /// The `@name` placeholders in the SQL are replaced with their typed literals.
+    /// Parameters are bound as true ODBC positional `?` parameters — no string
+    /// embedding. This prevents SQL injection and enables execution plan caching.
     ///
     /// `max_text_bytes` controls the TextRowSet per-cell limit. Cells wider than
-    /// this value are silently truncated. Use `QueryConfig::max_text_bytes` from
-    /// the application config; defaults to 65536 (64 KiB) when called directly.
+    /// this value are silently truncated by the ODBC driver.
     pub fn execute_query_sync(
         &mut self,
         sql: &str,
         params: &[OdbcParam],
         max_text_bytes: usize,
     ) -> Result<Vec<OdbcRow>, SqlError> {
+        use crate::pool::binding::params_to_positional;
         use odbc_api::buffers::TextRowSet;
         use odbc_api::Cursor;
 
         self.reset_session_if_needed();
 
-        let final_sql = embed_params(sql, params);
+        let (positional_sql, bound_params) = params_to_positional(sql, params);
 
         let mut stmt = self
             .inner
@@ -102,7 +106,7 @@ impl OdbcConn {
             .map_err(|e| SqlError::odbc(0, e.to_string()))?;
 
         let cursor = stmt
-            .execute(&final_sql, ())
+            .execute(&positional_sql, bound_params.as_slice())
             .map_err(|e| SqlError::odbc(extract_odbc_code(&e), e.to_string()))?;
 
         let mut rows = Vec::new();
@@ -151,24 +155,26 @@ impl OdbcConn {
 
     /// Execute a non-query (INSERT/UPDATE/DELETE). Returns actual rows affected.
     ///
-    /// The DML and `SELECT @@ROWCOUNT` are batched into a **single ODBC round-trip**
-    /// by appending them to the same SQL batch. This halves the network traffic
-    /// compared to the old two-statement approach.
+    /// The DML and `SELECT @@ROWCOUNT` are batched into a **single ODBC round-trip**.
+    /// Parameters are bound as true positional ODBC `?` bindings (no string embedding).
     pub fn execute_non_query_sync(
         &mut self,
         sql: &str,
         params: &[OdbcParam],
     ) -> Result<usize, SqlError> {
+        use crate::pool::binding::params_to_positional;
         use odbc_api::buffers::TextRowSet;
         use odbc_api::Cursor;
 
         self.reset_session_if_needed();
 
-        let dml_sql = embed_params(sql, params);
+        let (positional_dml, bound_params) = params_to_positional(sql, params);
         // Batch DML + row-count query into a single server round-trip.
         // @@ROWCOUNT reflects the rows affected by the immediately preceding
         // statement, so batching is safe here.
-        let batch_sql = format!("{dml_sql};\nSELECT @@ROWCOUNT AS r");
+        // Note: the @@ROWCOUNT part has no ? placeholders — bound_params covers
+        // only the DML's ? markers, which is correct.
+        let batch_sql = format!("{positional_dml};\nSELECT @@ROWCOUNT AS r");
 
         let mut stmt = self
             .inner
@@ -176,7 +182,7 @@ impl OdbcConn {
             .map_err(|e| SqlError::odbc(0, e.to_string()))?;
 
         let cursor = stmt
-            .execute(&batch_sql, ())
+            .execute(&batch_sql, bound_params.as_slice())
             .map_err(|e| SqlError::odbc(extract_odbc_code(&e), e.to_string()))?;
 
         let mut affected = 0usize;
@@ -233,6 +239,7 @@ impl OdbcConn {
 
     /// Execute a stored procedure (or any SQL) and return **all** result sets.
     ///
+    /// Parameters are bound as true positional ODBC `?` bindings.
     /// Iterates through every result set produced by the query using
     /// `more_results()` on the bound cursor, collecting each into a
     /// `Vec<OdbcRow>`. The outer `Vec` index corresponds to the result-set
@@ -243,12 +250,13 @@ impl OdbcConn {
         params: &[OdbcParam],
         max_text_bytes: usize,
     ) -> Result<Vec<Vec<OdbcRow>>, SqlError> {
+        use crate::pool::binding::params_to_positional;
         use odbc_api::buffers::TextRowSet;
         use odbc_api::Cursor;
 
         self.reset_session_if_needed();
 
-        let final_sql = embed_params(sql, params);
+        let (positional_sql, bound_params) = params_to_positional(sql, params);
 
         let mut stmt = self
             .inner
@@ -256,7 +264,7 @@ impl OdbcConn {
             .map_err(|e| SqlError::odbc(0, e.to_string()))?;
 
         let cursor = stmt
-            .execute(&final_sql, ())
+            .execute(&positional_sql, bound_params.as_slice())
             .map_err(|e| SqlError::odbc(extract_odbc_code(&e), e.to_string()))?;
 
         let mut result_sets: Vec<Vec<OdbcRow>> = Vec::new();
@@ -303,8 +311,7 @@ impl OdbcConn {
             result_sets.push(rows);
 
             // Unbind the buffer to recover the cursor, then advance to the
-            // next result set. `unbind()` re-releases the buffer binding on
-            // the ODBC statement before we call `more_results()`.
+            // next result set.
             let (next_cursor, _buf) = rsc
                 .unbind()
                 .map_err(|e| SqlError::odbc(0, e.to_string()))?;
@@ -323,123 +330,4 @@ impl OdbcConn {
 
 fn extract_odbc_code(e: &odbc_api::Error) -> i32 {
     if e.to_string().contains("1205") { 1205 } else { 0 }
-}
-
-/// Replace `@name` placeholders in `sql` with SQL-literal values.
-///
-/// Parameter names are matched longest-first to avoid `@id` accidentally
-/// matching inside `@id_prefix`. Uses a single-pass O(sql_len + N) scanner
-/// with one pre-sized allocation — avoids the O(N²) allocations of the naive
-/// multi-replace approach.
-fn embed_params(sql: &str, params: &[OdbcParam]) -> String {
-    if params.is_empty() {
-        return sql.to_owned();
-    }
-
-    // Sort descending by name length so longer names are tried first.
-    let mut sorted: Vec<&crate::params::OdbcParam> = params.iter().collect();
-    sorted.sort_unstable_by(|a, b| b.name.len().cmp(&a.name.len()));
-
-    // Pre-compute all SQL literals once (not once per occurrence).
-    let literals: Vec<(&str, String)> = sorted
-        .iter()
-        .map(|p| (p.name, param_to_sql_literal(&p.value)))
-        .collect();
-
-    // Estimate output capacity: original SQL + ~16 extra chars per param slot.
-    let mut out = String::with_capacity(sql.len() + params.len() * 16);
-
-    let bytes = sql.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        if bytes[i] == b'@' {
-            let rest = &sql[i + 1..];
-            // Try each param name (longest first) at this position.
-            let matched = literals.iter().find(|(name, _)| {
-                rest.starts_with(name) && {
-                    // Ensure the match ends at a word boundary (not part of a
-                    // longer identifier). A word boundary is end-of-string or a
-                    // non-alphanumeric, non-underscore character.
-                    let after = rest[name.len()..].as_bytes().first().copied();
-                    !matches!(after, Some(c) if c.is_ascii_alphanumeric() || c == b'_')
-                }
-            });
-
-            if let Some((name, literal)) = matched {
-                out.push_str(literal);
-                i += 1 + name.len(); // consume '@' + name
-            } else {
-                // Not a known param — emit '@' as-is.
-                out.push('@');
-                i += 1;
-            }
-        } else {
-            // SAFETY: bytes[i] is within a valid UTF-8 string; since it is not
-            // '@' (0x40), it may be a multi-byte sequence. Push the full char.
-            let ch = sql[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-
-    out
-}
-
-fn param_to_sql_literal(value: &crate::params::ParamValue) -> String {
-    use crate::params::ParamValue;
-
-    match value {
-        // ── Integer ───────────────────────────────────────────────────────────
-        ParamValue::Bool(v)    => if *v { "1".into() } else { "0".into() },
-        ParamValue::U8(v)      => v.to_string(),
-        ParamValue::I16(v)     => v.to_string(),
-        ParamValue::I32(v)     => v.to_string(),
-        ParamValue::I64(v)     => v.to_string(),
-
-        // ── Float ─────────────────────────────────────────────────────────────
-        // Use repr to avoid scientific notation for very small/large values
-        ParamValue::F32(v)     => format!("{v:.10}"),
-        ParamValue::F64(v)     => format!("{v:.17}"),
-
-        // ── Fixed-precision ───────────────────────────────────────────────────
-        ParamValue::Decimal(v) => v.to_string(),
-
-        // ── String (escape single quotes) ────────────────────────────────────
-        ParamValue::Str(v)     => format!("N'{}'", v.replace('\'', "''")),
-
-        // ── Binary → 0x hex literal ───────────────────────────────────────────
-        // Lookup-table approach: single pre-sized allocation, no per-byte format!().
-        ParamValue::Bytes(v) => {
-            if v.is_empty() {
-                "0x".into()
-            } else {
-                const HEX: &[u8; 16] = b"0123456789ABCDEF";
-                let mut out = String::with_capacity(2 + v.len() * 2);
-                out.push_str("0x");
-                for &b in v {
-                    out.push(HEX[(b >> 4) as usize] as char);
-                    out.push(HEX[(b & 0x0F) as usize] as char);
-                }
-                out
-            }
-        }
-
-        // ── Date / Time ───────────────────────────────────────────────────────
-        // date           → 'YYYY-MM-DD'
-        ParamValue::NaiveDate(v) => format!("'{}'", v.format("%Y-%m-%d")),
-        // time           → 'HH:MM:SS.nnnnnnn'
-        ParamValue::NaiveTime(v) => format!("'{}'", v.format("%H:%M:%S%.7f")),
-        // datetime/datetime2 → 'YYYY-MM-DD HH:MM:SS.nnnnnnn'
-        ParamValue::DateTime(v) => format!("'{}'", v.format("%Y-%m-%d %H:%M:%S%.7f")),
-        // datetimeoffset → 'YYYY-MM-DD HH:MM:SS.nnnnnnn +HH:MM'
-        ParamValue::DateTimeOffset(v) => format!("'{}'", v.format("%Y-%m-%d %H:%M:%S%.7f %:z")),
-
-        // ── uniqueidentifier → '{GUID}' ────────────────────────────────────
-        ParamValue::Guid(v)    => format!("'{v}'"),
-
-        // ── NULL ──────────────────────────────────────────────────────────────
-        ParamValue::Null       => "NULL".into(),
-    }
 }
